@@ -42,17 +42,17 @@
  *       this software without specific prior written permission. \n
  *
  * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU Lesser General Public License LGPL as 
- * published by the Free Software Foundation, either version 3 of the 
+ * it under the terms of the GNU Lesser General Public License LGPL as
+ * published by the Free Software Foundation, either version 3 of the
  * License, or (at your option) any later version.
- * 
+ *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU Lesser General Public License LGPL for more details.
- * 
- * You should have received a copy of the GNU Lesser General Public 
- * License LGPL along with this program. 
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License LGPL along with this program.
  * If not, see <http://www.gnu.org/licenses/>.
  *
  ****************************************************************/
@@ -69,19 +69,17 @@
 #include <actionlib/server/simple_action_server.h>
 
 // ROS message includes
-#include <std_msgs/Float32MultiArray.h>
+#include <std_msgs/Float64MultiArray.h>
 #include <trajectory_msgs/JointTrajectory.h>
 #include <sensor_msgs/JointState.h>
 #include <control_msgs/FollowJointTrajectoryAction.h>
 #include <control_msgs/JointTrajectoryControllerState.h>
 #include <schunk_sdh/TactileSensor.h>
 #include <schunk_sdh/TactileMatrix.h>
-#include <brics_actuator/JointVelocities.h>
-#include <brics_actuator/JointValue.h>
 
 // ROS service includes
-#include <cob_srvs/Trigger.h>
-#include <cob_srvs/SetOperationMode.h>
+#include <std_srvs/Trigger.h>
+#include <cob_srvs/SetString.h>
 
 // ROS diagnostic msgs
 #include <diagnostic_msgs/DiagnosticArray.h>
@@ -106,10 +104,9 @@ class SdhNode
 		ros::Publisher topicPub_ControllerState_;
 		ros::Publisher topicPub_TactileSensor_;
 		ros::Publisher topicPub_Diagnostics_;
-		
+
 		// topic subscribers
 		ros::Subscriber subSetVelocitiesRaw_;
-		ros::Subscriber subSetVelocities_;
 
 		// service servers
 		ros::ServiceServer srvServer_Init_;
@@ -142,16 +139,16 @@ class SdhNode
 		bool isError_;
 		int DOF_;
 		double pi_;
-		
+
 		trajectory_msgs::JointTrajectory traj_;
-		
+
 		std::vector<std::string> joint_names_;
 		std::vector<int> axes_;
 		std::vector<double> targetAngles_; // in degrees
 		std::vector<double> velocities_; // in rad/s
 		bool hasNewGoal_;
-		std::string operationMode_; 
-		
+		std::string operationMode_;
+
 	public:
 		/*!
 		* \brief Constructor for SdhNode class
@@ -163,18 +160,17 @@ class SdhNode
 			action_name_(name)
 		{
 			pi_ = 3.1415926;
-			
+
 			nh_ = ros::NodeHandle ("~");
 			isError_ = false;
 			// diagnostics
 			topicPub_Diagnostics_ = nh_.advertise<diagnostic_msgs::DiagnosticArray>("/diagnostics", 1);
-
 		}
 
 		/*!
 		* \brief Destructor for SdhNode class
 		*/
-		~SdhNode() 
+		~SdhNode()
 		{
 			if(isDSAInitialized_)
 				dsa_->Close();
@@ -195,8 +191,8 @@ class SdhNode
 			hasNewGoal_ = false;
 
 			// implementation of topics to publish
-			topicPub_JointState_ = nh_.advertise<sensor_msgs::JointState>("/joint_states", 1);
-			topicPub_ControllerState_ = nh_.advertise<control_msgs::JointTrajectoryControllerState>("state", 1);
+			topicPub_JointState_ = nh_.advertise<sensor_msgs::JointState>("joint_states", 1);
+			topicPub_ControllerState_ = nh_.advertise<control_msgs::JointTrajectoryControllerState>("joint_trajectory_controller/state", 1);
 			topicPub_TactileSensor_ = nh_.advertise<schunk_sdh::TactileSensor>("tactile_data", 1);
 
 			// pointer to sdh
@@ -207,18 +203,17 @@ class SdhNode
 			srvServer_Stop_ = nh_.advertiseService("stop", &SdhNode::srvCallback_Stop, this);
 			srvServer_Recover_ = nh_.advertiseService("recover", &SdhNode::srvCallback_Init, this); //HACK: There is no recover implemented yet, so we execute a init
 			srvServer_SetOperationMode_ = nh_.advertiseService("set_operation_mode", &SdhNode::srvCallback_SetOperationMode, this);
-			
-			subSetVelocitiesRaw_ = nh_.subscribe("set_velocities_raw", 1, &SdhNode::topicCallback_setVelocitiesRaw, this);
-			subSetVelocities_ = nh_.subscribe("set_velocities", 1, &SdhNode::topicCallback_setVelocities, this);
+
+			subSetVelocitiesRaw_ = nh_.subscribe("joint_group_velocity_controller/command", 1, &SdhNode::topicCallback_setVelocitiesRaw, this);
 
 			// getting hardware parameters from parameter server
 			nh_.param("sdhdevicetype", sdhdevicetype_, std::string("PCAN"));
 			nh_.param("sdhdevicestring", sdhdevicestring_, std::string("/dev/pcan0"));
 			nh_.param("sdhdevicenum", sdhdevicenum_, 0);
-			
+
 			nh_.param("dsadevicestring", dsadevicestring_, std::string(""));
 			nh_.param("dsadevicenum", dsadevicenum_, 0);
-			
+
 			nh_.param("baudrate", baudrate_, 1000000);
 			nh_.param("timeout", timeout_, (double)0.04);
 			nh_.param("id_read", id_read_, 43);
@@ -244,7 +239,7 @@ class SdhNode
 				joint_names_[i] = (std::string)joint_names_param[i];
 			}
 			std::cout << "joint_names = " << joint_names_param << std::endl;
-			
+
 			// define axes to send to sdh
 			axes_.resize(DOF_);
 			velocities_.resize(DOF_);
@@ -253,7 +248,7 @@ class SdhNode
 				axes_[i] = i;
 			}
 			ROS_INFO("DOF = %d",DOF_);
-			
+
 			state_.resize(axes_.size());
 
 			nh_.param("OperationMode", operationMode_, std::string("position"));
@@ -267,7 +262,7 @@ class SdhNode
 		bool switchOperationMode(const std::string &mode){
 			hasNewGoal_ = false;
 			sdh_->Stop();
-			
+
 			try{
 				if(mode == "position"){
 					sdh_->SetController(SDH::cSDH::eCT_POSE);
@@ -285,7 +280,7 @@ class SdhNode
 				delete e;
 				return false;
 			}
-			
+
 			operationMode_ = mode;
 			return true;
 
@@ -298,7 +293,7 @@ class SdhNode
 		* \param goal JointTrajectoryGoal
 		*/
 		void executeCB(const control_msgs::FollowJointTrajectoryGoalConstPtr &goal)
-		{			
+		{
 			ROS_INFO("sdh: executeCB");
 			if (operationMode_ != "position")
 			{
@@ -336,11 +331,11 @@ class SdhNode
 			targetAngles_[5] = goal->trajectory.points[0].positions[dict["sdh_finger_12_joint"]]*180.0/pi_; // sdh_finger12_joint
 			targetAngles_[6] = goal->trajectory.points[0].positions[dict["sdh_finger_13_joint"]]*180.0/pi_; // sdh_finger13_joint
 			ROS_INFO("received position goal: [['sdh_knuckle_joint', 'sdh_thumb_2_joint', 'sdh_thumb_3_joint', 'sdh_finger_12_joint', 'sdh_finger_13_joint', 'sdh_finger_22_joint', 'sdh_finger_23_joint']] = [%f,%f,%f,%f,%f,%f,%f]",goal->trajectory.points[0].positions[dict["sdh_knuckle_joint"]],goal->trajectory.points[0].positions[dict["sdh_thumb_2_joint"]],goal->trajectory.points[0].positions[dict["sdh_thumb_3_joint"]],goal->trajectory.points[0].positions[dict["sdh_finger_12_joint"]],goal->trajectory.points[0].positions[dict["sdh_finger_13_joint"]],goal->trajectory.points[0].positions[dict["sdh_finger_22_joint"]],goal->trajectory.points[0].positions[dict["sdh_finger_23_joint"]]);
-		
+
 			hasNewGoal_ = true;
-			
+
 			usleep(500000); // needed sleep until sdh starts to change status from idle to moving
-			
+
 			bool finished = false;
 			while(finished == false)
 			{
@@ -358,16 +353,16 @@ class SdhNode
 		 				finished = true;
 		 			}
 		 			else
-		 			{	
+		 			{
 		 				finished = false;
 		 			}
 		 		}
 		 		usleep(10000);
-				//feedback_ = 
+				//feedback_ =
 				//as_.send feedback_
 			}
 
-			// set the action state to succeeded			
+			// set the action state to succeeded
 			ROS_INFO("%s: Succeeded", action_name_.c_str());
 			//result_.result.data = "succesfully received new goal";
 			//result_.success = 1;
@@ -375,7 +370,7 @@ class SdhNode
 			as_.setSucceeded();
 		}
 
-		void topicCallback_setVelocitiesRaw(const std_msgs::Float32MultiArrayPtr& velocities)
+		void topicCallback_setVelocitiesRaw(const std_msgs::Float64MultiArrayPtr& velocities)
 		{
 			if (!isInitialized_)
 			{
@@ -405,49 +400,7 @@ class SdhNode
 
 			hasNewGoal_ = true;
 		}
- 		bool parseDegFromJointValue(const brics_actuator::JointValue& val, double &deg_val){
-		    if (val.unit == "rad/s"){
-			deg_val = val.value  * 180.0 / pi_;
-			return true;
-		    }else if (val.unit == "deg/s"){
-			deg_val = val.value;
-			return true;
-		    }else {
-			ROS_ERROR_STREAM("Rejected message, unit '" << val.unit << "' not supported");
-			return false;
-		    }
-		}
-		void topicCallback_setVelocities(const brics_actuator::JointVelocities::ConstPtr& msg)
-		{
-			if (!isInitialized_)
-			{
-				ROS_ERROR("%s: Rejected, sdh not initialized", action_name_.c_str());
-				return;
-			}
-			if(msg->velocities.size() != velocities_.size()){
-				ROS_ERROR("Velocity array dimension mismatch");
-				return;
-			}
-			if (operationMode_ != "velocity")
-			{
-				ROS_ERROR("%s: Rejected, sdh not in velocity mode", action_name_.c_str());
-				return;
-			}
 
-			// TODO: write proper lock!
-			while (hasNewGoal_ == true ) usleep(10000);
-			bool valid = true;
-
-			valid = valid && parseDegFromJointValue(msg->velocities[0], velocities_[0]); // sdh_knuckle_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[5], velocities_[1]); // sdh_finger22_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[6], velocities_[2]); // sdh_finger23_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[1], velocities_[3]); // sdh_thumb2_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[2], velocities_[4]); // sdh_thumb3_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[3], velocities_[5]); // sdh_finger12_joint
-			valid = valid && parseDegFromJointValue(msg->velocities[4], velocities_[6]); // sdh_finger13_joint
-
-			if (valid) hasNewGoal_ = true;
-		}		
 		/*!
 		* \brief Executes the service callback for init.
 		*
@@ -455,14 +408,14 @@ class SdhNode
 		* \param req Service request
 		* \param res Service response
 		*/
-		bool srvCallback_Init(cob_srvs::Trigger::Request &req,
-							cob_srvs::Trigger::Response &res )
+		bool srvCallback_Init(std_srvs::Trigger::Request &req,
+							std_srvs::Trigger::Response &res )
 		{
 
 			if (isInitialized_ == false)
 			{
-				//Init Hand connection	
-				
+				//Init Hand connection
+
 				try
 				{
 					if(sdhdevicetype_.compare("RS232")==0)
@@ -494,23 +447,23 @@ class SdhNode
 						else
 						{
 							ROS_ERROR("Currently only support for /dev/can0 and /dev/can1");
-							res.success.data = false;
-							res.error_message.data = "Currently only support for /dev/can0 and /dev/can1";
+							res.success = false;
+							res.message = "Currently only support for /dev/can0 and /dev/can1";
 							return true;
 						}
-						ROS_INFO("Initialized ESDCAN for SDH");	
+						ROS_INFO("Initialized ESDCAN for SDH");
 						isInitialized_ = true;
 					}
 				}
 				catch (SDH::cSDHLibraryException* e)
 				{
 					ROS_ERROR("An exception was caught: %s", e->what());
-					res.success.data = false;
-					res.error_message.data = e->what();
+					res.success = false;
+					res.message = e->what();
 					delete e;
 					return true;
 				}
-				
+
 				//Init tactile data
 				if(!dsadevicestring_.empty())  {
 					try
@@ -528,26 +481,26 @@ class SdhNode
 					{
 						isDSAInitialized_ = false;
 						ROS_ERROR("An exception was caught: %s", e->what());
-						res.success.data = false;
-						res.error_message.data = e->what();
+						res.success = false;
+						res.message = e->what();
 						delete e;
 						return true;
 					}
 				}
 				if(!switchOperationMode(operationMode_)){
-					res.success.data = false;
-					res.error_message.data = "Could not set operation mode to '" + operationMode_ + "'";
+					res.success = false;
+					res.message = "Could not set operation mode to '" + operationMode_ + "'";
 					return true;
 				}
 			}
 			else
 			{
 				ROS_WARN("...sdh already initialized...");
-				res.success.data = true;
-				res.error_message.data = "sdh already initialized";
+				res.success = true;
+				res.message = "sdh already initialized";
 			}
-			
-			res.success.data = true;
+
+			res.success = true;
 			return true;
 		}
 
@@ -558,8 +511,8 @@ class SdhNode
 		* \param req Service request
 		* \param res Service response
 		*/
-		bool srvCallback_Stop(cob_srvs::Trigger::Request &req,
-							cob_srvs::Trigger::Response &res )
+		bool srvCallback_Stop(std_srvs::Trigger::Request &req,
+							std_srvs::Trigger::Response &res )
 		{
 			ROS_INFO("Stopping sdh");
 
@@ -575,7 +528,7 @@ class SdhNode
 			}
 
 		ROS_INFO("Stopping sdh succesfull");
-		res.success.data = true;
+		res.success = true;
 		return true;
 	}
 
@@ -586,15 +539,15 @@ class SdhNode
 	* \param req Service request
 	* \param res Service response
 	*/
-	bool srvCallback_Recover(cob_srvs::Trigger::Request &req,
-							cob_srvs::Trigger::Response &res )
+	bool srvCallback_Recover(std_srvs::Trigger::Request &req,
+							std_srvs::Trigger::Response &res )
 	{
 		ROS_WARN("Service recover not implemented yet");
-		res.success.data = true;
-		res.error_message.data = "Service recover not implemented yet";
+		res.success = true;
+		res.message = "Service recover not implemented yet";
 		return true;
 	}
-	
+
 	/*!
 	* \brief Executes the service callback for set_operation_mode.
 	*
@@ -602,14 +555,14 @@ class SdhNode
 	* \param req Service request
 	* \param res Service response
 	*/
-	bool srvCallback_SetOperationMode(cob_srvs::SetOperationMode::Request &req,
-									cob_srvs::SetOperationMode::Response &res )
+	bool srvCallback_SetOperationMode(cob_srvs::SetString::Request &req,
+									cob_srvs::SetString::Response &res )
 	{
 		hasNewGoal_ = false;
 		sdh_->Stop();
-		ROS_INFO("Set operation mode to [%s]", req.operation_mode.data.c_str());
-		operationMode_ = req.operation_mode.data;
-		res.success.data = true;
+		ROS_INFO("Set operation mode to [%s]", req.data.c_str());
+		operationMode_ = req.data;
+		res.success = true;
 		if( operationMode_ == "position"){
 			sdh_->SetController(SDH::cSDH::eCT_POSE);
 		}else if( operationMode_ == "velocity"){
@@ -623,7 +576,7 @@ class SdhNode
 				delete e;
 			}
 		}else{
-			ROS_ERROR_STREAM("Operation mode '" << req.operation_mode.data << "'  not supported");
+			ROS_ERROR_STREAM("Operation mode '" << req.data << "'  not supported");
 		}
 		return true;
 	}
@@ -650,7 +603,7 @@ class SdhNode
 					ROS_ERROR("An exception was caught: %s", e->what());
 					delete e;
 				}
-		
+
 				if (operationMode_ == "position")
 				{
 					ROS_DEBUG("moving sdh in position mode");
@@ -690,7 +643,7 @@ class SdhNode
 				{
 					ROS_ERROR("sdh neither in position nor in velocity nor in effort mode. OperationMode = [%s]", operationMode_.c_str());
 				}
-				
+
 				hasNewGoal_ = false;
 			}
 
@@ -715,11 +668,11 @@ class SdhNode
 				ROS_ERROR("An exception was caught: %s", e->what());
 				delete e;
 			}
-			
+
 			ROS_DEBUG("received %d angles from sdh",(int)actualAngles.size());
-			
+
 			ros::Time time = ros::Time::now();
-			
+
 			// create joint_state message
 			sensor_msgs::JointState msg;
 			msg.header.stamp = time;
@@ -738,7 +691,7 @@ class SdhNode
 			msg.position[4] = actualAngles[6]*pi_/180.0; // sdh_finger_13_joint
 			msg.position[5] = actualAngles[1]*pi_/180.0; // sdh_finger_22_joint
 			msg.position[6] = actualAngles[2]*pi_/180.0; // sdh_finger_23_joint
-			// vel			
+			// vel
 			msg.velocity[0] = actualVelocities[0]*pi_/180.0; // sdh_knuckle_joint
 			msg.velocity[1] = actualVelocities[3]*pi_/180.0; // sdh_thumb_2_joint
 			msg.velocity[2] = actualVelocities[4]*pi_/180.0; // sdh_thumb_3_joint
@@ -748,8 +701,8 @@ class SdhNode
 			msg.velocity[6] = actualVelocities[2]*pi_/180.0; // sdh_finger_23_joint
 			// publish message
 			topicPub_JointState_.publish(msg);
-			
-			
+
+
 			// because the robot_state_publisher doen't know about the mimic joint, we have to publish the coupled joint separately
 			sensor_msgs::JointState  mimicjointmsg;
 			mimicjointmsg.header.stamp = time;
@@ -760,8 +713,8 @@ class SdhNode
 			mimicjointmsg.position[0] = msg.position[0]; // sdh_knuckle_joint = sdh_finger_21_joint
 			mimicjointmsg.velocity[0] = msg.velocity[0]; // sdh_knuckle_joint = sdh_finger_21_joint
 			topicPub_JointState_.publish(mimicjointmsg);
-			
-			
+
+
 			// publish controller state message
 			control_msgs::JointTrajectoryControllerState controllermsg;
 			controllermsg.header.stamp = time;
@@ -788,7 +741,7 @@ class SdhNode
 			}
 			// desired vel
 				// they are all zero
-			// actual pos			
+			// actual pos
 			controllermsg.actual.positions = msg.position;
 			// actual vel
 			controllermsg.actual.velocities = msg.velocity;
@@ -827,7 +780,7 @@ class SdhNode
 	        if(isDSAInitialized_)
 	        	diagnostics.status[0].message = "sdh with tactile sensing initialized and running";
 	        else
-	        	diagnostics.status[0].message = "sdh initialized and running, tactile sensors not connected";	
+	        	diagnostics.status[0].message = "sdh initialized and running, tactile sensors not connected";
 	      }
 	      else
 	      {
@@ -874,7 +827,7 @@ class SdhNode
 			msg.tactile_matrix.resize(dsa_->GetSensorInfo().nb_matrices);
 			for ( int i = 0; i < dsa_->GetSensorInfo().nb_matrices; i++ )
 			{
-				m = dsa_reorder[i];                                  
+				m = dsa_reorder[i];
 				schunk_sdh::TactileMatrix &tm = msg.tactile_matrix[i];
 				tm.matrix_id = i;
 				tm.cells_x = dsa_->GetMatrixInfo( m ).cells_x;
@@ -889,7 +842,7 @@ class SdhNode
 			//publish matrix
 			topicPub_TactileSensor_.publish(msg);
 		}
-	}	 
+	}
 }; //SdhNode
 
 /*!
@@ -905,7 +858,7 @@ int main(int argc, char** argv)
 	//SdhNode sdh_node(ros::this_node::getName() + "/joint_trajectory_action");
 	SdhNode sdh_node(ros::this_node::getName() + "/follow_joint_trajectory");
 	if (!sdh_node.init()) return 0;
-	
+
 	ROS_INFO("...sdh node running...");
 
 	double frequency;
@@ -925,10 +878,10 @@ int main(int argc, char** argv)
 	{
 		// publish JointState
 		sdh_node.updateSdh();
-		
+
 		// publish TactileData
 		sdh_node.updateDsa();
-		
+
 		// sleep and waiting for messages, callbacks
 		ros::spinOnce();
 		loop_rate.sleep();

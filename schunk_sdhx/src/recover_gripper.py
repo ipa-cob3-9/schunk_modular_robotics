@@ -1,23 +1,18 @@
 #!/usr/bin/python
 
-import roslib
-roslib.load_manifest('cob_script_server')
-import rospy
 import os
 
-import dynamic_reconfigure.client
-from cob_srvs.srv import Trigger
-
-from simple_script_server import *
-sss = simple_script_server()
+import rospy
+from std_srvs.srv import Trigger, TriggerResponse
 
 def right_cb(req):
     rospy.loginfo("recovering gripper_right")
-    os.system("rosnode kill /gripper_right")
+    os.system("rosnode kill /gripper_right/gripper_right_node")
     return TriggerResponse()
 
 def left_cb(req):
     rospy.loginfo("recovering gripper_left")
+    os.system("rosnode kill /gripper_left/gripper_left_node")
     return TriggerResponse()
 
 if __name__ == "__main__":
